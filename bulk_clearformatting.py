@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
+#
 # Removes the field formatting of all selected notes.
+#
+# Author: xelif@icqmail.com
 
 
 from PyQt4.QtCore import *
