@@ -74,7 +74,7 @@ coloursuspended = QColor()
 coloursuspended.setNamedColor(browser.COLOUR_SUSPENDED)
 colourmarked = QColor()
 colourmarked.setNamedColor(browser.COLOUR_MARKED)
-lightness_list = [basecolour.lightness()] + range(textcolour.lightness()-25, textcolour.lightness()+26)
+lightness_list = [basecolour.lightness()] + range(max(0, textcolour.lightness()-25), min(255, textcolour.lightness()+26))
 hue_list = [basecolour.hue(), textcolour.hue()]
 for colour in [coloursuspended, colourmarked]:
     (h, s, l, a) = colour.getHsl()
