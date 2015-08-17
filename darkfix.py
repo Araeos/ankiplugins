@@ -3,7 +3,8 @@
 # Modifies the default colour scheme in places that conflict with darker
 # system colours.
 #
-# Version: 1.4
+# Version: 1.4.1
+# - Fixed invalid colour values in range lightness_list.
 #
 # Author: xelif@icqmail.com
 from anki.hooks import wrap
