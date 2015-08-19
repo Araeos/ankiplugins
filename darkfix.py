@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 #
+# Author: xelif@icqmail.com
+# Licence: GPLv3
+#
 # Modifies the default colour scheme in places that conflict with darker
 # system colours.
 #
-# Version: 1.4.1
+# Version: 1.4.3, Patch by: flan                                [2015-08-19 Wed]
+# - Fixed infinite loop on start when one of the palette hues is not in the
+#   [0, 360] range
+# Version: 1.4.2                                                [2015-02-05 Thu]
 # - Fixed invalid colour values in range lightness_list.
 #
-# Author: xelif@icqmail.com
 from anki.hooks import wrap
 from aqt import editor, browser, reviewer
-from aqt.qt import *
+from aqt.qt import QPalette, QColor
 import math
 import re
 
@@ -49,6 +54,7 @@ def getAlternateHue(values, pref=None):
         return (a, h(a))
     def makeHeuristic(a, b):
         return lambda x: min(hueDiff(a,x), hueDiff(x, b)) * (1 - 0.00045 * (0 if pref is None else hueDiff(x, pref)**2))
+    values = [(i + 360) % 360 if i not in range(361) else i for i in values]
     values = sorted(set(values))
     candidates = []
     if len(values) == 0:
