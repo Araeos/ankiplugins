@@ -42,7 +42,7 @@ def main():
     colourmarked.setNamedColor(browser.COLOUR_MARKED)
     lightness_blacklist = [textcolour.lightness()]
     hue_blacklist = [basecolour.hue(), textcolour.hue()]
-    lightness_preference = max(basecolour.lightness(), 50)
+    lightness_preference = max(basecolour.lightness(), 40)
     for colour in [coloursuspended, colourmarked]:
         (h, s, l, a) = colour.getHsl()
         new_lightness = get_new_lightness(lightness_blacklist, lightness_preference)
@@ -123,7 +123,7 @@ def get_new_hue(existing, pref):
             if pref is None: distance = None
             else:            distance = min((pref - val) % 360,
                                             (val - pref) % 360)
-            r = rating(space, distance, 360, crit_range=20, crit_value=0.85)
+            r = rating(space, distance, 360, crit_range=40, crit_value=0.8)
             if r > best_val[1]:
                 best_val = (val, r)
         return best_val
@@ -142,24 +142,28 @@ def get_new_hue(existing, pref):
 #-------------------------------------------------------------------------------
 # Helper methods
 #-------------------------------------------------------------------------------
-def recenter_interval(center):
+def recenter_interval(center, inverse = False):
     """Returns a function that maps values from (0, 1) to (0, 1).
 
     Center is the position where previous values are mapped to below 0.5
     and following values above 0.5.
     The properties of the returned function `f` in the interval [0, 1] are:
-     - f(0.) = 0.
-     - f(1.) = 1.
-     - f(center) = 0.5
      - f is increasing (monotonic)
      - f is continuous (gaps are subject to floating point precision)
-    Outside the interval, the result is not defined.
+     - f(0.) = 0.
+     - f(1.) = 1.
+     - Main critera depends on `inverse`:
+         - f(center) = 0.5, if False or omitted
+         - f(0.5) = center, if True
+    The returned function is undefined outside the (closed) interval [0, 1].
 
     To satisfy the above properties, center must be within (0, 1), but neither
     0 nor 1 is allowed.
     Args:
         center (float): The value within the domain (0, 1) which will be mapped
             to 0.5.
+        inverse (bool): When False or omitted map `center` to 0.5. Else map 0.5
+            to `center` (inverse function).
 
     Returns:
         Callable[[float], float]: The function with the above properties.
@@ -167,7 +171,6 @@ def recenter_interval(center):
     max_error = 0.0000001
     if abs(center - 0) < max_error or abs(center - 1) < max_error:
         raise RuntimeError("center ({0}) must be within open interval (0, 1)".format(center))
-        return None
     if abs(center - 0.5) < max_error:
         return lambda x: x
     elif center < 0.5:
@@ -180,7 +183,10 @@ def recenter_interval(center):
         b = -1
         c = - center**2 / (1 - 2*center)
         d = 1 - a * math.log(c - 1)
-    return lambda x: a * math.log(b*x + c) + d
+    if inverse:
+        return lambda x: b * (math.e**((x - d) / a) - c)
+    else:
+        return lambda x: a * math.log(b*x + c) + d
 
 def rating_comp_undesired(maximum, undesired):
     """Helper for the rating function."""
@@ -190,7 +196,7 @@ def rating_comp_undesired(maximum, undesired):
 def rating_comp_required(maximum, required, crit_range, crit_value):
     """Helper for the rating function."""
     f_x = recenter_interval(float(crit_range) / maximum)
-    f_y = recenter_interval(1 - crit_value)
+    f_y = recenter_interval(crit_value, True)
     return f_y(0.5 * (1 - math.cos(f_x(float(required) / maximum) * math.pi)))
 
 def rating(required, undesired, maximum, crit_range = None, crit_value = 0.8):
@@ -203,14 +209,17 @@ def rating(required, undesired, maximum, crit_range = None, crit_value = 0.8):
         required (float): A value between 0 and 'maximum' which should not
             not be too low. Higher is better, but undesired may win out
             quickly depending on the values of 'crit_range' and 'crit_value'.
+            Within (0, crit_range) slopes to reach `crit_value` influence
+            and then more slowly again until it reaches 1 at `maximum`.
         undesired (float): A value between 0 and 'maximum' which
             is desired to be low.
         maximum (float): Maximum value that 'undesired'/'required' will
             have. The minimum is always 0.
         crit_range (Optional[int]): The range in which the required value's
-            importance is lower than the value indicated by `crit_value`.
+            importance is lower than indicated by `crit_value`.
         crit_value (Optional[float]): The quotient of importance that
-            'required' has when reaching the 'crit_range'.
+            'required' will have when equal to 'crit_range'.
+            Must be between 0 and 1 (exclusive).
     Returns:
         int: Rating that shows the quality of compromise between 'required'
             and 'undesired'."""
