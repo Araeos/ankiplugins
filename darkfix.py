@@ -6,6 +6,10 @@
 # Modifies the default colour scheme in places that conflict with darker
 # system colours.
 #
+# Version: 1.5.0                                                [2015-08-22 Sat]
+# - Improved colours in browser; suspended and marked cards are better
+#   integrated in the user's colour theme.
+# - Refactored colour selection code.
 # Version: 1.4.3, Patch by: flan                                [2015-08-19 Wed]
 # - Fixed infinite loop on start when one of the palette hues is not in the
 #   [0, 360] range
@@ -18,87 +22,209 @@ from aqt.qt import QPalette, QColor
 import math
 import re
 
-# Query system colours.
-p = QPalette()
-textcolour = p.color(QPalette.Text)
-basecolour = p.color(QPalette.Base)
+def main():
+    # Query system colours.
+    p = QPalette()
+    textcolour = p.color(QPalette.Text)
+    basecolour = p.color(QPalette.Base)
 
-def getAlternateLightness(values, lower=0, upper=255):
-    values = sorted(set(values))
-    candidates = []
-    if len(values) == 0:
-        return (upper - lower) / 2
-    if values[0] > lower:
-        candidates.append((lower, math.sqrt(values[0]) - math.sqrt(lower)))
-    if values[-1] < upper:
-        candidates.append((upper, math.sqrt(upper) - math.sqrt(values[-1])))
-    for i in range(len(values) - 1):
-        a, b = values[i], values[i+1]
-        #middle = (values[i+1] - values[i]) / 2
-        middle = math.floor((a + b + 2 * math.sqrt(a) * math.sqrt(b)) / 4)
-        candidates.append((middle, min(abs(math.sqrt(middle) - math.sqrt(a)), abs(math.sqrt(b) - math.sqrt(middle)))))
-    candidates.sort(key=lambda (val, diff): abs(diff))
-    return candidates[-1][0]
+    # Inject background colour into the browser.
+    def tree_colour_hook(self):
+        p = self.form.tree.palette()
+        p.setColor(QPalette.Base, basecolour)
+        self.form.tree.setPalette(p)
+    browser.Browser.setupTree = wrap(browser.Browser.setupTree, tree_colour_hook)
 
-def hueDiff(a, b):
-    return min((a - b) % 360, (b - a) % 360)
+    # Change suspend and mark colours.
+    coloursuspended = QColor()
+    coloursuspended.setNamedColor(browser.COLOUR_SUSPENDED)
+    colourmarked = QColor()
+    colourmarked.setNamedColor(browser.COLOUR_MARKED)
+    lightness_blacklist = [textcolour.lightness()]
+    hue_blacklist = [basecolour.hue(), textcolour.hue()]
+    lightness_preference = max(basecolour.lightness(), 50)
+    for colour in [coloursuspended, colourmarked]:
+        (h, s, l, a) = colour.getHsl()
+        new_lightness = get_new_lightness(lightness_blacklist, lightness_preference)
+        # print("Considering {0} with preference {2} choose lightness {1}\n".format(
+        #     lightness_blacklist, new_lightness, lightness_preference))
+        new_hue = get_new_hue(hue_blacklist, h)
+        # print("Considering {0} with preference {2} choose hue {1}\n".format(
+        #     hue_blacklist, new_hue, h))
+        hue_blacklist.append(new_hue)
+        colour.setHsl(new_hue, s, new_lightness, a)
+    browser.COLOUR_SUSPENDED = coloursuspended.name()
+    browser.COLOUR_MARKED = colourmarked.name()
 
-def getAlternateHue(values, pref=None):
-    def maxMiddle(a, b, h):
-        while a != b:
-            m = (a + ((b - a) % 360) / 2) % 360
-            if h(m) <= h(m+1):
-                a = m+1
-            else:
-                b = m
-        return (a, h(a))
-    def makeHeuristic(a, b):
-        return lambda x: min(hueDiff(a,x), hueDiff(x, b)) * (1 - 0.00045 * (0 if pref is None else hueDiff(x, pref)**2))
-    values = [(i + 360) % 360 if i not in range(361) else i for i in values]
-    values = sorted(set(values))
-    candidates = []
-    if len(values) == 0:
+    # Inject colouring into the web view.
+    editor._html = re.sub(
+        "(\\.fname\s*\\{)",
+        "\\1 color: {0};".format(textcolour.name()),
+        editor._html)
+    # Fix the default text colour for type answer edit elements.
+    reviewer.Reviewer._css = re.sub(
+        "(#typeans\s*\\{)",
+        "\\1 color: {0};".format(textcolour.name()),
+        reviewer.Reviewer._css)
+
+def get_new_lightness(existing, pref):
+    """Given a list of existing lightness return a new, different value.
+
+    Args:
+        existing (List[int]): List of existing values to avoid.
+        pref (Optional[int]): Preferred value. May be none.
+
+    Returns:
+        int: The best value."""
+    # Filter input of duplicates and sort it (required below).
+    existing = sorted(set(existing))
+    if len(existing) == 0:
         return 0;
-    if len(values) == 1:
-        a, b = values[0], (values[0] - 1) % 360
-        return maxMiddle(a, b, makeHeuristic(a, b))[0]
-    for i in range(len(values)):
-        a, b = values[i], values[(i + 1) % len(values)]
-        candidates.append(maxMiddle(a, b, makeHeuristic(a, b)))
-    candidates.sort(key=lambda (val, diff): diff)
-    return candidates[-1][0]
+    else:
+        a, b = None, None
+        candidates = []
+        for exist_value in existing + [None]:
+            a, b = b, exist_value
+            # From low(inclusive) to high(exclusive).
+            low, high = (0 if a is None else a + 1), (256 if b is None else b)
+            diff =  high - low
+            for offset in range(0, diff):
+                val = low + offset
+                if   a is None: space = diff - offset
+                elif b is None: space = offset
+                else:           space = min(diff - offset, offset)
+                if pref is None: distance = None
+                else:            distance = abs(pref - val)
+                r = rating(space, distance, 256, crit_range=50, crit_value=0.85)
+                candidates.append((val, r))
+        candidates.sort(key=lambda (val, diff): diff)
+        return candidates[-1][0]
 
 
-# Inject background colour into the browser.
-def mySetupTree(self):
-    p = self.form.tree.palette()
-    p.setColor(QPalette.Base, basecolour)
-    self.form.tree.setPalette(p)
-browser.Browser.setupTree = wrap(browser.Browser.setupTree, mySetupTree)
+def get_new_hue(existing, pref):
+    """Given a list of existing hues return a new, different value.
 
-# Change suspend and mark colours.
-coloursuspended = QColor()
-coloursuspended.setNamedColor(browser.COLOUR_SUSPENDED)
-colourmarked = QColor()
-colourmarked.setNamedColor(browser.COLOUR_MARKED)
-lightness_list = [basecolour.lightness()] + range(max(0, textcolour.lightness()-25), min(255, textcolour.lightness()+26))
-hue_list = [basecolour.hue(), textcolour.hue()]
-for colour in [coloursuspended, colourmarked]:
-    (h, s, l, a) = colour.getHsl()
-    l = getAlternateLightness(lightness_list, 30, 210)
-    h = getAlternateHue(hue_list, h)
-    colour.setHsl(h, s, l, a)
-    hue_list.append(h)
-browser.COLOUR_SUSPENDED = coloursuspended.name()
-browser.COLOUR_MARKED = colourmarked.name()
+    Args:
+        existing (List[int]): List of existing values to avoid.
+        pref (Optional[int]): Preferred value. May be none.
 
-# Inject colouring into the web view.
-editor._html = re.sub(
-    "(\\.fname\s*\\{)",
-    "\\1 color: {0};".format(textcolour.name()),
-    editor._html)
-# Fix the default text colour for type answer edit elements.
-reviewer.Reviewer._css = re.sub(
-    "(#typeans\s*\\{)",
-    "\\1 color: {0};".format(textcolour.name()),
-    reviewer.Reviewer._css)
+    Returns:
+        int: The best value."""
+    def choose_best_between(low, high):
+        """Rate all hues from low(exclusive) to high(exclusive).
+
+        When a == b is true, this will scan all other 359 hues.
+        """
+        diff = (high - low - 1) % 360
+        best_val = (None, 0)
+        for offset in range(1, diff + 1):
+            val = (low + offset) % 360
+            space = min(offset, diff - offset + 1)
+            if pref is None: distance = None
+            else:            distance = min((pref - val) % 360,
+                                            (val - pref) % 360)
+            r = rating(space, distance, 360, crit_range=20, crit_value=0.85)
+            if r > best_val[1]:
+                best_val = (val, r)
+        return best_val
+    # Filter input of duplicates and sort it (required below).
+    existing = sorted(set(existing))
+    if len(existing) == 0:
+        return 0;
+    else:
+        candidates = []
+        for i in range(len(existing)):
+            a, b = existing[i], existing[(i + 1) % len(existing)]
+            candidates.append(choose_best_between(a, b))
+        candidates.sort(key=lambda (val, diff): diff)
+        return candidates[-1][0]
+
+#-------------------------------------------------------------------------------
+# Helper methods
+#-------------------------------------------------------------------------------
+def recenter_interval(center):
+    """Returns a function that maps values from (0, 1) to (0, 1).
+
+    Center is the position where previous values are mapped to below 0.5
+    and following values above 0.5.
+    The properties of the returned function `f` in the interval [0, 1] are:
+     - f(0.) = 0.
+     - f(1.) = 1.
+     - f(center) = 0.5
+     - f is increasing (monotonic)
+     - f is continuous (gaps are subject to floating point precision)
+    Outside the interval, the result is not defined.
+
+    To satisfy the above properties, center must be within (0, 1), but neither
+    0 nor 1 is allowed.
+    Args:
+        center (float): The value within the domain (0, 1) which will be mapped
+            to 0.5.
+
+    Returns:
+        Callable[[float], float]: The function with the above properties.
+            May be None when `center` is not well within (0, 1)."""
+    max_error = 0.0000001
+    if abs(center - 0) < max_error or abs(center - 1) < max_error:
+        raise RuntimeError("center ({0}) must be within open interval (0, 1)".format(center))
+        return None
+    if abs(center - 0.5) < max_error:
+        return lambda x: x
+    elif center < 0.5:
+        a = 1 / (2 * math.log(1 / center - 1))
+        b = 1
+        c = center**2 / (1 - 2*center)
+        d = -a * math.log(c)
+    else:
+        a = -1 / (2 * math.log(1 / (1 - center) - 1))
+        b = -1
+        c = - center**2 / (1 - 2*center)
+        d = 1 - a * math.log(c - 1)
+    return lambda x: a * math.log(b*x + c) + d
+
+def rating_comp_undesired(maximum, undesired):
+    """Helper for the rating function."""
+    return 0.5 * (1 + math.cos(math.pi * undesired / maximum))
+    return 1 - 1. / maximum * undesired
+
+def rating_comp_required(maximum, required, crit_range, crit_value):
+    """Helper for the rating function."""
+    f_x = recenter_interval(float(crit_range) / maximum)
+    f_y = recenter_interval(1 - crit_value)
+    return f_y(0.5 * (1 - math.cos(f_x(float(required) / maximum) * math.pi)))
+
+def rating(required, undesired, maximum, crit_range = None, crit_value = 0.8):
+    """Calculate a rating based on given parameters heuristically.
+
+    A higher rating means a good compromise of values 'required' and
+    'undesired'.
+
+    Args:
+        required (float): A value between 0 and 'maximum' which should not
+            not be too low. Higher is better, but undesired may win out
+            quickly depending on the values of 'crit_range' and 'crit_value'.
+        undesired (float): A value between 0 and 'maximum' which
+            is desired to be low.
+        maximum (float): Maximum value that 'undesired'/'required' will
+            have. The minimum is always 0.
+        crit_range (Optional[int]): The range in which the required value's
+            importance is lower than the value indicated by `crit_value`.
+        crit_value (Optional[float]): The quotient of importance that
+            'required' has when reaching the 'crit_range'.
+    Returns:
+        int: Rating that shows the quality of compromise between 'required'
+            and 'undesired'."""
+    if crit_range is None:
+        crit_range = 0.1 * maximum
+    r_s =  rating_comp_required(maximum, required, crit_range, crit_value)
+    r_d =  rating_comp_undesired(maximum, undesired)
+    return 0.5 * (r_s + r_d)
+
+
+#-------------------------------------------------------------------------------
+# Entry point
+#-------------------------------------------------------------------------------
+if __name__ == "__main__":
+    print("This python script should be run as an anki addon.")
+else:
+    main()
