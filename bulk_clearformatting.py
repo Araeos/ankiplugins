@@ -2,8 +2,9 @@
 #
 # Removes the field formatting of all selected notes.
 #
-# Author: xelif@icqmail.com
-
+# Author: Felix Esch
+# VCS+issues: https://github.com/Araeos/ankiplugins
+# Licence: GNU General Public Licence (GNU GPL), version 3
 
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *

@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 #
-# Author: xelif@icqmail.com
-# Licence: GPLv3
-#
 # Modifies the default colour scheme in places that conflict with darker
 # system colours.
+#
+# Author: Felix Esch
+# VCS+issues: https://github.com/Araeos/ankiplugins
+# Licence: GNU General Public Licence (GNU GPL), version 3
 #
 # Version: 1.5.0                                                [2015-08-22 Sat]
 # - Improved colours in browser; suspended and marked cards are better
@@ -15,7 +16,7 @@
 #   [0, 360] range
 # Version: 1.4.2                                                [2015-02-05 Thu]
 # - Fixed invalid colour values in range lightness_list.
-#
+
 from anki.hooks import wrap
 from aqt import editor, browser, reviewer
 from aqt.qt import QPalette, QColor
